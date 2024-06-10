@@ -1,11 +1,12 @@
 import gradio as gr
 import subprocess
 import shutil
+import os
 
 def unzip(filename):
     shutil.unpack_archive(filename, extract_dir="extracted")
 
-def zip(folder):
+def zip_folder(folder):
     shutil.make_archive("dist", 'zip', folder)
 
 def build_project(os_dropdown, project_name, description, product_name, org_name, company_name, copyright, 
@@ -14,8 +15,10 @@ def build_project(os_dropdown, project_name, description, product_name, org_name
                   flutter_build_args, include_packages, build_number, build_version, 
                   module_name, template, template_dir, template_ref):
     
+    dir_name = os.listdir("extracted")[0]
+
     if os_dropdown:
-        command = ["flet", "build", os_dropdown.value]
+        command = ["flet", "build", os_dropdown, f"extracted/{dir_name}"]
     else:
         raise KeyError("Please choose operating system to compile.")
     if project_name:
@@ -67,23 +70,27 @@ def build_project(os_dropdown, project_name, description, product_name, org_name
     if template_ref:
         command.extend(["--template-ref", template_ref])
 
-    # command.append("linux")  # Assuming the target platform is Linux for demonstration
-
     try:
         result = subprocess.run(command, capture_output=True, text=True, check=True)
-        return result.stdout
+        zip_folder(f"extracted/{dir_name}/dist/{os_dropdown.lower()}")
+        return result.stdout, "dist.zip"
     except subprocess.CalledProcessError as e:
-        return f"Error: {e.stderr}"
+        return f"Error: {e.stderr}", None
 
 # Define the GUI layout
 with gr.Blocks() as demo:
     with gr.Column():
         gr.Markdown("# FletBuild")
+
+        def process_file(file):
+            # file is a tempfile.NamedTemporaryFile object
+            file_path = file.name
+            unzip(filename=file_path)
         
         with gr.Row():
-            input_file = gr.File(type="filepath", label="App File")
-            upload_button = gr.Button("Upload")
-        
+            file_input = gr.File(type="filepath", label="App File", file_types=[".zip", ".tar"])
+            file_input.upload(process_file, inputs=file_input, outputs=[])
+
         with gr.Row():
             with gr.Column():
                 gr.Markdown("## Operating System")
@@ -120,8 +127,15 @@ with gr.Blocks() as demo:
                 
         build_button = gr.Button("Build")
         
+        build_output = gr.Textbox(label="Build Output")
+        download_link = gr.File(label="Download ZIP")
+
+        def build_and_get_zip(*args):
+            build_output, zip_path = build_project(*args)
+            return build_output, zip_path if zip_path else None
+
         build_button.click(
-            build_project,
+            build_and_get_zip,
             inputs=[
                 os_dropdown, project_name, description, product_name, org_name, company_name, copyright, 
                 splash_color, splash_dark_color, no_web_splash, no_ios_splash, no_android_splash,
@@ -129,7 +143,7 @@ with gr.Blocks() as demo:
                 flutter_build_args, include_packages, build_number, build_version, 
                 module_name, template, template_dir, template_ref
             ],
-            outputs=gr.Textbox(label="Build Output")
+            outputs=[build_output, download_link]
         )
 
 # Launch the Gradio app
